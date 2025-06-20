@@ -88,7 +88,7 @@ def grant_access(
     else:
         print("Grant access failed:", response.text)
 
-def access_file(file_name: str, uploader_username: str, receiver_username: str, receiving_sk: SecretKey):
+def access_file(file_name: str, uploader_username: str, receiver_username: str, receiving_sk: SecretKey) -> str | None:
     uploader_encryption_pk, uploader_signing_pk = get_public_key(uploader_username)
     receiver_pk, _ = get_public_key(receiver_username)
 
@@ -100,7 +100,7 @@ def access_file(file_name: str, uploader_username: str, receiver_username: str, 
 
     if response.status_code != 200:
         print("Failed to access file:", response.text)
-        return
+        return None
 
     data = response.json()
     cfrag = CapsuleFrag.from_bytes(base64.b64decode(data["cfrag"]))
@@ -121,8 +121,7 @@ def access_file(file_name: str, uploader_username: str, receiver_username: str, 
         ciphertext=ciphertext
     )
 
-    # for now, just print the decrypted file
-    print("Decrypted file content:", decrypted_bytes.decode())
+    return decrypted_bytes.decode()
 
 def fixed_secret(label):
         return SecretKey.from_bytes(label.ljust(32, b'_'))

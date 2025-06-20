@@ -1,5 +1,15 @@
 from umbral import SecretKey, Signer
 from .client import login, upload_file, grant_access, access_file
+from pathlib import Path
+
+def load_secret_key_from_file(prompt: str) -> SecretKey | None:
+    path = input(prompt).strip()
+    try:
+        key_bytes = Path(path).read_bytes()
+        return SecretKey.from_bytes(key_bytes)
+    except Exception as e:
+        print(f"Failed to load secret key from {path}: {e}")
+        return None
 
 def repl():
     current_user = None
@@ -40,14 +50,11 @@ def repl():
                     continue
                 receiver = input("Grant access to (username): ").strip()
                 file_name = input("File name: ").strip()
-                sk_hex = input("Enter your encryption secret key (hex): ").strip()
-                sig_sk_hex = input("Enter your signing secret key (hex): ").strip()
 
-                try:
-                    encryption_sk = SecretKey.from_bytes(bytes.fromhex(sk_hex))
-                    signing_sk = SecretKey.from_bytes(bytes.fromhex(sig_sk_hex))
-                except Exception as e:
-                    print("Invalid secret key(s):", e)
+                encryption_sk = load_secret_key_from_file("Path to encryption secret key file: ")
+                signing_sk = load_secret_key_from_file("Path to signing secret key file: ")
+
+                if not encryption_sk or not signing_sk:
                     continue
 
                 signer = Signer(signing_sk)
@@ -59,15 +66,25 @@ def repl():
                     continue
                 uploader = input("Uploader username: ").strip()
                 file_name = input("File name: ").strip()
-                sk_hex = input("Enter your encryption secret key (hex): ").strip()
 
-                try:
-                    encryption_sk = SecretKey.from_bytes(bytes.fromhex(sk_hex))
-                except Exception as e:
-                    print("Invalid secret key:", e)
+                encryption_sk = load_secret_key_from_file("Path to your encryption secret key file: ")
+                if not encryption_sk:
                     continue
 
-                access_file(file_name, uploader, current_user, encryption_sk)
+                file_content = access_file(file_name, uploader, current_user, encryption_sk)
+
+                if file_content is None:
+                    print("Failed to access or decrypt the file.")
+                    continue
+
+                output_path = input("Output path to save the decrypted file: ").strip()
+
+                try:
+                    from pathlib import Path
+                    Path(output_path).write_text(file_content)
+                    print(f"Decrypted file saved to: {output_path}")
+                except Exception as e:
+                    print(f"Failed to write file: {e}")
 
             else:
                 print("Unknown command. Valid commands are: login, upload, grant, access, exit")
