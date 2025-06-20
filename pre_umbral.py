@@ -33,6 +33,7 @@ import random
 kfrags = random.sample(kfrags,  # All kfrags from above
                         1)      # M - Threshold
 
+
 from umbral import reencrypt
 cfrags = list()                 # Bob's cfrag collection
 for kfrag in kfrags:

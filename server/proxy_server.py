@@ -1,25 +1,20 @@
-import os
 import sqlite3
 from pathlib import Path
-from umbral import PublicKey
+from umbral import Capsule, PublicKey, VerifiedKeyFrag, reencrypt
 from db import DB_PATH
-from fastapi import WebSocket
-import json
 
 
 DATA_DIR = Path("server_data/files")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# In-memory WebSocket connections indexed by username
-active_websockets = {}
 
-def login(username, password):
+def login(username: str, password: str) -> bool:
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
         return c.fetchone() is not None
 
-def get_public_key(username):
+def get_public_key(username: str) -> tuple[PublicKey, PublicKey]:
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT encryption_pk, verifying_pk FROM users WHERE username=?", (username,))
@@ -30,53 +25,67 @@ def get_public_key(username):
             return encryption_pk, verifying_pk
         return None, None
 
-def upload_encrypted_file(file_name, uploader_username, capsule_bytes, ciphertext_bytes):
+def upload_encrypted_file(file_name: str, uploader_username: str, capsule_bytes: bytes, ciphertext_bytes: bytes) -> bool:
     file_path = DATA_DIR / f"{uploader_username}__{file_name}"
     file_path.write_bytes(ciphertext_bytes)
 
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
+        # store capsule as hex string
         c.execute('''INSERT OR REPLACE INTO files (file_name, uploader, capsule, ciphertext_path)
                      VALUES (?, ?, ?, ?)''',
-                  (file_name, uploader_username, capsule_bytes, str(file_path)))
+                  (file_name, uploader_username, capsule_bytes.hex(), str(file_path)))
         conn.commit()
+        return True
 
-def grant_access(file_name, uploader_username, receiver_username, kfrag_bytes):
-    print(f"Granting access to {receiver_username} for file {file_name}")
-
+def grant_access(file_name: str, uploader_username: str, receiver_username: str, kfrag_bytes: bytes) -> bool:
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
-        c.execute("SELECT capsule, ciphertext_path FROM files WHERE file_name=? AND uploader=?",
-                  (file_name, uploader_username))
-        row = c.fetchone()
-        if not row:
-            print("File not found.")
-            return
 
-        capsule_bytes, ciphertext_path = row
+        c.execute("SELECT id, capsule FROM files WHERE file_name=? AND uploader=?", (file_name, uploader_username))
+        file_row = c.fetchone()
+
+        if not file_row:
+            print("File not found")
+            return False
+        
+        file_id, capsule_bytes = file_row
+        capsule = Capsule.from_bytes(bytes.fromhex(capsule_bytes))
+
+
+        kfrag = VerifiedKeyFrag.from_verified_bytes(kfrag_bytes)
+        cfrag = reencrypt(capsule=capsule, kfrag=kfrag)
+
+        c.execute('''INSERT OR REPLACE INTO file_permission (file_id, receiver, cfrag)
+                     VALUES (?, ?, ?)''',
+                  (file_id, receiver_username, bytes(cfrag)))
+        conn.commit()
+        return True
+
+    
+def access_file(file_name: str, uploader_username: str, receiver_username: str) -> tuple[bytes, bytes, bytes] | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, capsule, ciphertext_path FROM files WHERE file_name=? AND uploader=?",
+                  (file_name, uploader_username))
+        file_row = c.fetchone()
+        
+        if not file_row:
+            print("File not found.")
+            return None
+
+        file_id, capsule_hex, ciphertext_path = file_row
+        capsule_bytes = bytes.fromhex(capsule_hex)
+
         ciphertext = Path(ciphertext_path).read_bytes()
 
-        # WebSocket push if receiver is connected
-        if receiver_username in active_websockets:
-            ws = active_websockets[receiver_username]
-            try:
-                ws_data = {
-                    "file_name": file_name,
-                    "uploader": uploader_username,
-                    "kfrag": kfrag_bytes.hex(),
-                    "capsule": capsule_bytes.hex(),
-                    "ciphertext": ciphertext.hex()
-                }
-                ws.send_text(json.dumps(ws_data))
-                print(f"Sent data to {receiver_username} via WebSocket.")
-            except Exception as e:
-                print(f"WebSocket send error: {e}")
+        c.execute("SELECT cfrag FROM file_permission WHERE file_id=? AND receiver=?", (file_id, receiver_username))
+        file_permission_row = c.fetchone()
 
-        return kfrag_bytes, capsule_bytes, ciphertext
+        if not file_permission_row:
+            print("No permission")
+            return None
+        
+        cfrag_bytes = file_permission_row[0]
 
-def register_websocket(username: str, websocket: WebSocket):
-    active_websockets[username] = websocket
-
-def unregister_websocket(username: str):
-    if username in active_websockets:
-        del active_websockets[username]
+        return ciphertext, capsule_bytes, cfrag_bytes

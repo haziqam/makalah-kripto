@@ -10,7 +10,6 @@ if __name__ == "__main__":
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # User table
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password TEXT,
@@ -18,16 +17,22 @@ if __name__ == "__main__":
         verifying_pk BLOB
     )''')
 
-    # File metadata table
     c.execute('''CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         file_name TEXT,
         uploader TEXT,
         capsule BLOB,
-        ciphertext_path TEXT,
-        PRIMARY KEY (file_name, uploader)
+        ciphertext_path TEXT
     )''')
 
-    conn.commit()
+    c.execute('''CREATE TABLE IF NOT EXISTS file_permission (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INT,
+        receiver TEXT,
+        cfrag BLOB,
+        FOREIGN KEY(file_id) REFERENCES file(id),
+        FOREIGN KEY(receiver) REFERENCES users(username)
+    )''')
 
     def fixed_secret(label):
         return SecretKey.from_bytes(label.ljust(32, b'_'))
@@ -50,9 +55,4 @@ if __name__ == "__main__":
 
     c.executemany("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)", users)
     conn.commit()
-
-    c.execute("SELECT * FROM users")
-    for row in c.fetchall():
-        print(row)
-
     conn.close()
