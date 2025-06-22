@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     c.execute('''CREATE TABLE IF NOT EXISTS file_permission (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        file_id INT,
+        file_id INTEGER,
         receiver TEXT,
         cfrag BLOB,
         FOREIGN KEY(file_id) REFERENCES file(id),
